@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Demazure Weave</title>
+        <link rel="icon" href="weave_icon.png" type="image/icon type">
+        <script type="text/javascript" async
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+        </script>
+    </head>
+    <style>
+        #canvas_column {
+            float: left;
+            width: 800px;
+            padding: 10px;
+            display:table-cell;
+        }
+
+        #quiver_column {
+            float: left;
+            padding: 10px;
+            position: absolute;
+            left: 850px;
+            top: 130px;
+            width: 450px;
+            height: 350px;
+            overflow-y: auto;
+            overflow-x: auto;
+            display:table-cell;
+        }
+        
+        #output {
+            float: left;
+            padding: 10px;
+            position: absolute;
+            left: 850px;
+            top: 500px;
+            right: 0px;
+            overflow-y: auto;
+            overflow-x: auto;
+            display:table-cell;
+        }
+    </style>
+    <body>
+        <div class="row">
+            <div class="column">
+                <form>
+                    <label for="num_str">Number of strands</label> &nbsp; <input type="text" id="num_str" name="num_str" value="3"> &nbsp; &nbsp;
+                    <label for="braid">Braid word</label> &nbsp; <input type="text" id="braid" name="braid" value="1,2,1,1,2,1"> &nbsp; &nbsp;
+                    <label for="latex">LaTeX</label> &nbsp; <input type="checkbox" id="latex" name="latex" value="yes" checked><br>
+                </form>
+                <br>
+                    <button type="button" onclick="initiate()">Initiate</button> &nbsp; &nbsp;
+                    <button type="button" onclick="pinch()">Pinch</button> &nbsp; &nbsp;
+                    <button type="button" onclick="braid_move()">Braid move</button> &nbsp; &nbsp;
+                    <button type="button" onclick="commute()">Commuting strands</button> &nbsp; &nbsp;
+                    <button type="button" onclick="go_back()">Go back</button> &nbsp; &nbsp;
+                    <button type="button" onclick="compute()">Compute cluster variables</button>
+                <br>
+                <br>
+                <label for="color_list">Weave colors</label> &nbsp; <input type="color_list" id="color_list" name="color_list" value="blue,red,green" size="20"> &nbsp; &nbsp;
+                <label for="cycle_color_list">Cycle colors</label> &nbsp; <input type="cycle_color_list" id="cycle_color_list" name="cycle_color_list" value="lime,aqua,silver,orange,teal,navy,brown" size="40"><br><br>
+            </div>
+            <div id="canvas_column">
+                <canvas id="weave" width="800" height="600" style="border:1px solid #000000;"></canvas>
+                <br>
+                <div id="cycles_check_boxes"></div>
+            </div>
+        </div>
+        <div class="column">
+            <div id="quiver_column">
+                <canvas id="quiver" width="400" height="300" style="border:1px solid #000000;"></canvas>
+            </div>
+            <div id="output"></div>
+        </div>
+    </body>
+    <script src = "new_polynomial.js"></script>
+    <script src = "new_braid.js"></script>
+    <script>
+        var weave = document.getElementById("weave");
+        var wtx = weave.getContext("2d");
+        var quiver = document.getElementById("quiver");
+        var qtx = quiver.getContext("2d");
+        var draw_state = 0;
+        var latex = false;
+        var listener = false;
+        var horizontal_spacing = 800;
+        var vertical_spacing = 50;
+        var color_list = document.getElementById("color_list").value.split(",");
+        var cycle_color_list = document.getElementById("cycle_color_list").value.split(",");
+        var cycles_to_draw = [];
+        var weave_length = 600;
+        var braid_record = [];
+        var moves = [];
+        var mode = 0;
+        var cycles = [];
+        var ex_mat = [];
+        var frozen = [];
+        var variables = [];
+        var vertex_position = [];
+        var q_horizontal_spacing = 400;
+        var q_vertical_spacing = 400;
+
+        function summation(list) {
+            var result = 0;
+            for (var i=0;i<list.length;i++) {
+                result += list[i];
+            }
+            return(result);
+        }
+
+        function arrow(a,b,bend=false,solid=true) {
+            var angle = 0;
+            if (b[0]==a[0]) {
+                angle = Math.sign(b[1]-a[1])*Math.PI/2;
+            }
+            else {
+                angle = Math.atan2(b[1]-a[1],b[0]-a[0]);
+            }
+            if (bend && b[0]==a[0]) {
+                var mid_pt = [(a[0]+b[0])/2+25,(a[1]+b[1])/2];
+            } else {
+                var mid_pt = [(a[0]+b[0])/2,(a[1]+b[1])/2];
+            }
+            qtx.beginPath();
+            qtx.moveTo(a[0],a[1]);
+            if (!solid) {
+                for (var i=0;i<7;i++) {
+                    qtx.lineTo(a[0]+(2*i+1)*(b[0]-a[0])/13,a[1]+(2*i+1)*(b[1]-a[1])/13);
+                    qtx.stroke();
+                    qtx.moveTo(a[0]+(2*i+2)*(b[0]-a[0])/13,a[1]+(2*i+2)*(b[1]-a[1])/13);
+                }
+            } else if (bend && b[0]==a[0]) {
+                qtx.quadraticCurveTo(mid_pt[0]+25,mid_pt[1],b[0],b[1]);
+                qtx.stroke();
+            } else {
+                qtx.lineTo(b[0],b[1]);
+                qtx.stroke();
+                qtx.closePath();
+            }
+            qtx.beginPath();
+            qtx.moveTo(mid_pt[0]+5*Math.cos(angle+Math.PI*3/4),mid_pt[1]+5*Math.sin(angle+Math.PI*3/4));
+            qtx.lineTo(mid_pt[0]+5*Math.cos(angle),mid_pt[1]+5*Math.sin(angle));
+            qtx.lineTo(mid_pt[0]+5*Math.cos(angle-Math.PI*3/4),mid_pt[1]+5*Math.sin(angle-Math.PI*3/4));
+            qtx.stroke();
+            qtx.fillStyle = "black";
+            qtx.fill();
+            qtx.closePath();
+            return;
+        }
+
+        function colored_circle(a,color,label){
+            qtx.font = "25px, Arial";
+            qtx.fillStyle = color;
+            qtx.beginPath();
+            qtx.arc(a[0],a[1],10,0,2*Math.PI,false);
+            qtx.fill();
+            qtx.stroke();
+            qtx.closePath();
+            qtx.fillStyle = "white";
+            if (label.length==1) {
+                qtx.fillText(label,a[0]-2.5,a[1]+2.5);
+            } else {
+                qtx.fillText(label,a[0]-6,a[1]+2.5);
+            }
+            return;
+        }
+
+        function q_coord(a) {
+            return([a[0]*q_horizontal_spacing,a[1]*q_vertical_spacing]);
+        }
+
+        function vertex_in_between(a,b) {
+            if (a[0] != b[0]) {
+                return(false);
+            } else {
+                var result = false;
+                for (var i=0;i<vertex_position.length;i++) {
+                    if (vertex_position[i][0] == a[0] && ((vertex_position[i][1]-a[1])*(vertex_position[i][1]-b[1]))<0) {
+                        result = true;
+                        break;
+                    }
+                }
+                return(result);
+            } 
+        }
+
+        function draw() {
+            horizontal_spacing = 800/(braid_record[0].word.length+1);
+            original_braid = braid_record[0].clone();
+            var seed_data = original_braid.cycles_and_quiver(moves);
+            cycles = arrayClone(seed_data[0]);
+            ex_mat = arrayClone(seed_data[1]);
+            vertex_position = arrayClone(seed_data[2]);
+            frozen = arrayClone(seed_data[3]);
+            variables = [];
+            if (braid_record.length>9) {
+                weave_length = 60*(braid_record.length+2);
+                weave.height = weave_length;
+            }
+            wtx.clearRect(0, 0, 800, weave_length);
+            if (cycles_to_draw.length > 0) { //drawing cycles
+                for (var i=0;i<cycles_to_draw.length;i++) {
+                    if (cycles_to_draw[i]) {
+                        var j = 0;
+                        var pinch_counter = 0;
+                        var first_pinch = 0;
+                        var first_pinch_not_found = true;
+                        while (pinch_counter < i+1) {
+                            if (moves[j][0] == "p") {
+                                pinch_counter++;
+                            }
+                            if (pinch_counter == 1 && first_pinch_not_found) {
+                                first_pinch = j;
+                                first_pinch_not_found = false;
+                            }
+                            j++;
+                        }
+                        j--;
+                        wtx.beginPath();
+                        wtx.strokeStyle = cycle_color_list[i];
+                        wtx.lineWidth = 10;
+                        wtx.moveTo(horizontal_spacing*(moves[j][1]+1),120+60*j);
+                        wtx.lineTo(horizontal_spacing*(moves[j][1]+1),150+60*j);
+                        wtx.stroke();
+                        wtx.closePath();
+                        if (j<moves.length-1) {
+                            wtx.beginPath();
+                            wtx.fillStyle = cycle_color_list[i];
+                            wtx.moveTo(horizontal_spacing*(moves[j][1]+1),150+60*j);
+                            wtx.arc(horizontal_spacing*(moves[j][1]+1),150+60*j,5,0,2*Math.PI,false);
+                            wtx.fill();
+                            wtx.closePath();
+                        }
+                        j++;
+                        while (j<moves.length && summation(cycles[j-first_pinch-1][i]) > 0) {
+                            if (moves[j][0] == "p") {
+                                for (var k=0;k<cycles[j-first_pinch-1][i].length;k++) {
+                                    if (cycles[j-first_pinch-1][i][k] > 0) {
+                                        if (k<= moves[j][1]) {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),90+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k+1),120+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        } else {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),90+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k),120+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                            if (k>moves[j][1]+1) {
+                                                wtx.beginPath();
+                                                wtx.fillStyle = cycle_color_list[i];
+                                                wtx.moveTo(horizontal_spacing*(k),120+60*j);
+                                                wtx.arc(horizontal_spacing*(k),120+60*j,5,0,2*Math.PI,false);
+                                                wtx.fill();
+                                                wtx.closePath();
+                                            }
+                                        } 
+                                        if ((k==moves[j][1] && cycles[j-first_pinch][i][moves[j][1]] >0) || k<moves[j][1]) {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),120+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k+1),150+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        } else if (k>moves[j][1]+1) {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k),120+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k),150+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        }
+                                        if (cycles[j-first_pinch-1][i][k] > 1) {
+                                            wtx.fillStyle = cycle_color_list[i];
+                                            wtx.fillText(String(cycles[j-first_pinch-1][i][k]),horizontal_spacing*(k+1)+15,105+60*j);
+                                        }
+                                    }
+                                }
+                            } else if (moves[j][0] == "b") {
+                                for (var k=0;k<cycles[j-first_pinch-1][i].length;k++) {
+                                    if (cycles[j-first_pinch-1][i][k] > 0) {
+                                        if (k == moves[j][1] || k == moves[j][1]-1 || k == moves[j][1]+1) {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),90+60*j);
+                                            wtx.lineTo(horizontal_spacing*(moves[j][1]+1),120+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        } else {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),90+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k+1),150+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        }
+                                        if (cycles[j-first_pinch-1][i][k] > 1) {
+                                            wtx.fillStyle = cycle_color_list[i];
+                                            wtx.fillText(String(cycles[j-first_pinch-1][i][k]),horizontal_spacing*(k+1)+15,105+60*j);
+                                        }
+                                    }
+                                    if (cycles[j-first_pinch][i][k] > 0) {
+                                        if (k == moves[j][1] || k == moves[j][1]-1 || k == moves[j][1]+1) {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),150+60*j);
+                                            wtx.lineTo(horizontal_spacing*(moves[j][1]+1),120+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        }
+                                    }
+                                }
+                            } else if (moves[j][0] == "c") {
+                                for (var k=0;k<cycles[j-first_pinch-1][i].length;k++) {
+                                    if (cycles[j-first_pinch-1][i][k]>0) {
+                                        if (k == moves[j][1]) {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),90+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k+2),150+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        } else if (k == moves[j][1]+1) {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),90+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k),150+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        } else {
+                                            wtx.beginPath();
+                                            wtx.strokeStyle = cycle_color_list[i];
+                                            wtx.lineWidth = 10;
+                                            wtx.moveTo(horizontal_spacing*(k+1),90+60*j);
+                                            wtx.lineTo(horizontal_spacing*(k+1),150+60*j);
+                                            wtx.stroke();
+                                            wtx.closePath();
+                                        }
+                                        if (cycles[j-first_pinch-1][i][k] > 1) {
+                                            wtx.fillStyle = cycle_color_list[i];
+                                            wtx.fillText(String(cycles[j-first_pinch-1][i][k]),horizontal_spacing*(k+1)+15,105+60*j);
+                                        }
+                                    }
+                                }
+                            }
+                            if (j<moves.length-1) {
+                                for (var k=0;k<cycles[j-first_pinch][i].length;k++) {
+                                    if (cycles[j-first_pinch][i][k] > 0) {
+                                        wtx.beginPath();
+                                        wtx.fillStyle = cycle_color_list[i];
+                                        wtx.moveTo(horizontal_spacing*(k+1),150+60*j);
+                                        wtx.arc(horizontal_spacing*(k+1),150+60*j,5,0,2*Math.PI,false);
+                                        wtx.fill();
+                                        wtx.closePath();
+                                    }
+                                }
+                            }
+                            j++;
+                        }
+                    }
+                }
+            }
+            for (var j=0;j<braid_record[0].word.length;j++) {
+                wtx.beginPath();
+                wtx.lineWidth = 1;
+                wtx.strokeStyle = color_list[braid_record[0].word[j]-1];
+                wtx.moveTo(horizontal_spacing*(j+1),30);
+                wtx.lineTo(horizontal_spacing*(j+1),90);
+                wtx.stroke();
+                wtx.closePath();
+            }
+            for (var i=1;i<braid_record.length;i++) {
+                if (moves[i-1][0] == "p") {
+                    for (var j=0;j<braid_record[i-1].word.length;j++) {
+                        if (j <= moves[i-1][1]) {
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i-1].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(j+1),30+60*i);
+                            wtx.lineTo(horizontal_spacing*(j+1),90+60*i);
+                            wtx.stroke();
+                            wtx.closePath();
+                        } else {
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i-1].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(j+1),30+60*i);
+                            wtx.lineTo(horizontal_spacing*(j),60+60*i);
+                            wtx.stroke();
+                            if (j>moves[i-1][1]+1) {
+                                wtx.moveTo(horizontal_spacing*(j),60+60*i);
+                                wtx.lineTo(horizontal_spacing*(j),90+60*i);
+                                wtx.stroke();
+                            }
+                            wtx.closePath();
+                        }
+                    }
+                } else if (moves[i-1][0] == "b") {
+                    for (var j=0;j<braid_record[i-1].word.length;j++) {
+                        if (!([moves[i-1][1]-1,moves[i-1][1],moves[i-1][1]+1].includes(j))) {
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i-1].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(j+1),30+60*i);
+                            wtx.lineTo(horizontal_spacing*(j+1),90+60*i);
+                            wtx.stroke();
+                            wtx.closePath();
+                        } else {
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i-1].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(j+1),30+60*i);
+                            wtx.lineTo(horizontal_spacing*(moves[i-1][1]+1),60+60*i);
+                            wtx.stroke();
+                            wtx.closePath();
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(moves[i-1][1]+1),60+60*i);
+                            wtx.lineTo(horizontal_spacing*(j+1),90+60*i);
+                            wtx.stroke();
+                            wtx.closePath();
+                        }
+                    }
+                } else if (moves[i-1][0] == "c") {
+                    for (var j=0;j<braid_record[i-1].word.length;j++) {
+                        if (j==moves[i-1][1]){
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i-1].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(j+1),30+60*i);
+                            wtx.lineTo(horizontal_spacing*(j+2),90+60*i);
+                            wtx.stroke();
+                            wtx.closePath();
+                        } else if (j==moves[i-1][1]+1) {
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i-1].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(j+1),30+60*i);
+                            wtx.lineTo(horizontal_spacing*(j),90+60*i);
+                            wtx.stroke();
+                            wtx.closePath();
+                        } else {
+                            wtx.beginPath();
+                            wtx.strokeStyle = color_list[braid_record[i-1].word[j]-1];
+                            wtx.moveTo(horizontal_spacing*(j+1),30+60*i);
+                            wtx.lineTo(horizontal_spacing*(j+1),90+60*i);
+                            wtx.stroke();
+                            wtx.closePath();
+                        }
+                    }
+                }
+            }
+            if (cycles.length>0) {
+                qtx.clearRect(0, 0, 400, 300);
+                q_horizontal_spacing = 400/(cycles[0][0].length+1);
+                q_vertical_spacing = 300/(cycles.length+1);
+                for (var i=0;i<cycles[cycles.length-1].length;i++) {
+                    for (var j=i+1;j<cycles[cycles.length-1].length;j++) {
+                        if (ex_mat[i][j] > 0) {
+                            if (vertex_in_between(vertex_position[i],vertex_position[j])) {
+                                arrow(q_coord(vertex_position[i]),q_coord(vertex_position[j]), true);
+                            } else {
+                                arrow(q_coord(vertex_position[i]),q_coord(vertex_position[j]));
+                            }  
+                        } else if (ex_mat[i][j] < 0) {
+                            if (vertex_in_between(vertex_position[i],vertex_position[j])) {
+                                arrow(q_coord(vertex_position[j]),q_coord(vertex_position[i]), true);
+                            } else {
+                                arrow(q_coord(vertex_position[j]),q_coord(vertex_position[i]));
+                            }  
+                        }   
+                    }
+                    if (frozen.includes(i)) {
+                        colored_circle(q_coord(vertex_position[i]),"blue",String(i+1));
+                    } else {
+                        colored_circle(q_coord(vertex_position[i]),"red",String(i+1));
+                    }
+                }    
+            }
+        }
+
+        function redraw () {
+            mode = 0;
+            cycles_to_draw = [];
+            for (var i=0;i<cycles[cycles.length-1].length;i++) {
+                cycles_to_draw.push(document.getElementById("cycle"+String(i)).checked);
+            }
+            draw();
+        }
+
+
+
+        function info() {
+            if (cycles.length>0) {
+                document.getElementById("output").innerHTML = "Among the cluster variables, the frozen variables are ";
+                for (var i=0;i<frozen.length;i++) {
+                    document.getElementById("output").innerHTML += "\\(A_{"+String(frozen[i]+1)+"}\\)";
+                    if (i<frozen.length-1) {
+                        document.getElementById("output").innerHTML += ", ";
+                    } else {
+                        document.getElementById("output").innerHTML += ". <br>";
+                    }
+                }
+                document.getElementById("output").innerHTML += "<br>The exchange matrix is <br>";
+                document.getElementById("output").innerHTML += "\\(\\begin{pmatrix}";
+                for (var i=0;i<cycles[cycles.length-1].length;i++) {
+                    for (var j=0;j<cycles[cycles.length-1].length;j++) {
+                        if (j < cycles[cycles.length-1].length-1) {
+                            document.getElementById("output").innerHTML += String(ex_mat[i][j])+"&";
+                        } else if (i<cycles[cycles.length-1].length-1) {
+                            document.getElementById("output").innerHTML += String(ex_mat[i][j])+"\\\\";
+                        } else {
+                            document.getElementById("output").innerHTML +=  String(ex_mat[i][j])+"\\end{pmatrix}\\)<br>";
+                        }
+                    }
+                }
+                if (latex) {
+                    MathJax.Hub.Typeset();
+                }
+            } else {
+                document.getElementById("output").innerHTML = "";
+            }
+        }
+
+        function get_location(weave, evt) {
+            var rect = weave.getBoundingClientRect();
+            var index = Math.min(braid_record[braid_record.length-1].word.length-1, Math.max(0,Math.floor((evt.clientX-rect.left)/horizontal_spacing)-1));
+            console.log(index);
+            return(index);
+        }
+
+        function mouseClick(index) {
+            if (mode == 1) {
+                if (B.pinch(index)) {
+                    braid_record.push(B.clone());
+                    moves.push(["p",index]);
+                }
+            } else if (mode == 2) {
+                if (B.braid_move(index)) {
+                    braid_record.push(B.clone());
+                    moves.push(["b",index]);
+                } 
+            } else if (mode == 3) {
+                if (B.commute(index)) {
+                    braid_record.push(B.clone());
+                    moves.push(["c",index]);
+                }
+            }
+            draw();
+            info();
+            if (cycles.length>0) {
+                document.getElementById("cycles_check_boxes").innerHTML = "<br><button type='button' onclick='redraw()''>Draw cycles</button> &nbsp; &nbsp;";
+                for (var i=0;i<cycles[cycles.length-1].length;i++) {
+                    document.getElementById("cycles_check_boxes").innerHTML += "<label for='cycle'"+String(i)+">cycle "+String(i+1)+"</label> &nbsp; <input type='checkbox' id='cycle"+String(i)+"' name='cycle"+String(i)+"' value='yes'>&nbsp; &nbsp;";
+                }
+            }
+        }
+        
+        function initiate() {
+            latex = document.getElementById("latex").checked;
+            var num_str = parseInt(document.getElementById("num_str").value);
+            var word = document.getElementById("braid").value.split(",");
+            for(var i=0;i<word.length;i++) {
+                word[i] = parseInt(word[i]);
+                if (word[i]<=0 || word[i]>=num_str) {
+                    window.alert("Some of the crossings are invalid.");
+                    return;
+                }
+            }
+            B = new braid(num_str, word);
+            braid_record = [];
+            moves = [];
+            mode = 0;
+            cycles = [];
+            ex_mat = [];
+            frozen = [];
+            variables = [];
+            vertex_position = [];
+            cycles_to_draw = [];
+            document.getElementById("output").innerHTML = "";
+            document.getElementById("cycles_check_boxes").innerHTML = "";
+            var q_horizontal_spacing = 400;
+            var q_vertical_spacing = 400;
+            qtx.clearRect(0, 0, 400, 300);
+            braid_record.push(B.clone());
+            draw();
+            if (!listener) {
+                weave.addEventListener(
+                    "click",function(evt){
+                        index = get_location(weave, evt);
+                        if (index != null) {
+                            mouseClick(index);
+                        }
+                    }
+                )
+                listener = true;
+            }
+        }
+
+        function pinch() {
+            mode = 1;
+        }
+
+        function braid_move() {
+            mode = 2;
+        }
+
+        function commute() {
+            mode = 3;
+        }
+
+        function go_back() {
+            mode = 0;
+            braid_record.splice(braid_record.length-1,1);
+            variables = [];
+            B = braid_record[braid_record.length-1].clone();
+            var last_move = moves.splice(moves.length-1,1);
+            if (cycles.length>0) {
+                cycles.splice(cycles.length-1,1);
+            }
+            if (last_move[0][0] == "p") {
+                ex_mat.splice(ex_mat.length-1,1);
+                for (var i=0;i<ex_mat.length;i++) {
+                    ex_mat[i].splice(ex_mat[i].length-1,1);
+                }
+                vertex_position.splice(vertex_position.length-1,1);
+                cycles_to_draw.splice(cycles_to_draw.length-1,1);
+            }
+            frozen = [];
+            for (var i=0;i<cycles[cycles.length-1].length;i++) {
+                for (var j=0;j<cycles[cycles.length-1][i].length;j++) {
+                    if (cycles[cycles.length-1][i][j] > 0) {
+                        frozen.push(i);
+                        break;
+                    }
+                }
+            }
+            console.log("go back one step.");
+            draw();
+            info();
+            if (cycles.length>0) {
+                document.getElementById("cycles_check_boxes").innerHTML = "<br><button type='button' onclick='redraw()''>Draw cycles</button> &nbsp; &nbsp;";
+                for (var i=0;i<cycles[cycles.length-1].length;i++) {
+                    document.getElementById("cycles_check_boxes").innerHTML += "<label for='cycle'"+String(i)+">cycle "+String(i+1)+"</label> &nbsp; <input type='checkbox' id='cycle"+String(i)+"' name='cycle"+String(i)+"' value='yes'>&nbsp; &nbsp;";
+                }
+            }
+        }
+
+        function compute() {
+            mode = 0;
+            draw();
+            info();
+            if (cycles.length>0) {
+                original_braid = braid_record[0].clone();
+                variables = original_braid.cluster_variables(moves);
+                document.getElementById("output").innerHTML += "<br>The cluster variables are <br>";
+                for (var i=0;i<variables.length;i++) {
+                    document.getElementById("output").innerHTML += "\\(A_{"+String(i+1)+"}="+variables[i].present()+"\\)" +"<br>";
+                }
+            }
+            if (latex) {
+                MathJax.Hub.Typeset();
+            }
+        }
+    </script>
+</html>
+

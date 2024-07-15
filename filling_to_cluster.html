@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Filling to Cluster Calculator</title>
+        <link rel="icon" href="icon.png" type="image/icon type">
+        <script type="text/javascript" async
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+        </script>
+    </head>
+    <style>
+        #canvas_column {
+            float: left;
+            width: 700px;
+            padding: 10px;
+            height: 750px; 
+            display:table-cell;
+        }
+
+        #output {
+            float: left;
+            padding: 10px;
+            height: 750px; 
+            position: absolute;
+            left: 740px;
+            top: 85px;
+            right: 0px;
+            overflow-y: auto;
+            overflow-x: auto;
+            display:table-cell;
+        }
+        
+        #main {
+            width: 100%;
+            height: 770
+        }
+
+        
+        </style>
+    <body>
+        <form>
+            <br>
+            <label for="num_str">Number of strands</label> &nbsp; <input type="text" id="num_str" name="num_str" value="2"> &nbsp; &nbsp;
+            <label for="braid">Braid word</label> &nbsp; <input type="text" id="braid" name="braid" value="1,1,1"> &nbsp; &nbsp;
+            <label for="sign_mat">Sign matrix</label> &nbsp; <input type="text" id="sign_mat" name="sign_mat" value="identity"> &nbsp; &nbsp;
+            <label for="diff">Differentials</label> &nbsp; <input type="checkbox" id="diff" name="diff" value="no"> &nbsp; &nbsp;
+            <label for="latex">LaTeX</label> &nbsp; <input type="checkbox" id="latex" name="latex" value="yes" checked><br>
+        </form>
+        <br>
+        <button type="button" onclick="initiate()">Draw</button> &nbsp; &nbsp;
+        <button type="button" onclick="pinch()">Pinch</button> &nbsp; &nbsp;
+        <button type="button" onclick="braidMove()">Braid Move</button> &nbsp; &nbsp;
+        <button type="button" onclick="commute()">Commute Crossings</button> &nbsp; &nbsp;
+        <button type="button" onclick="ccw_rot()">Ccw. Rotate</button> &nbsp; &nbsp;
+        <button type="button" onclick="cw_rot()">Cw. Rotate</button> &nbsp; &nbsp;
+        <button type="button" onclick="back()">Go Back</button> &nbsp; &nbsp;
+        <br>
+        <div id="main">
+            <div id="canvas_column">
+                <canvas id="braid_diagram" width="700" height="350" style="border:1px solid #000000;"></canvas>
+                <br>
+                <br>
+                <canvas id="quiver_diagram" width="700" height="350" style="border:1px solid #000000;"></canvas>
+            </div>
+            <div id="output">
+            </div>
+        </div>
+        <script src = "polynomial.js"></script>
+        <script src = "cluster.js"></script>
+        <script src = "braid.js"></script>
+        <script>
+            var br_diag = document.getElementById("braid_diagram");
+            var br_ctx = br_diag.getContext("2d");
+            var q_diag = document.getElementById("quiver_diagram");
+            var q_ctx = q_diag.getContext("2d");
+            var state = 0;
+            var cross_spacing = 0;
+            var level_spacing = 0;
+            var selected_crossing = null;
+            var double = [];
+            var triple = [];
+            var stages = [];
+            var nolistener = true;
+            var latex = false;
+            var differentials = [];
+            var show_diff = false;
+            
+            // stages consists of 
+            // (0) a braid;
+            // (1) quiver vertices on each level;
+            // (2) the mutation sequences so far;
+            // (3) the cluster;
+            // (4) Reeb chords assignment;
+            // (5) what have been done so far.
+
+
+
+            function output_info() {
+                document.getElementById("output").innerHTML ="";
+                document.getElementById("output").innerHTML += "The number of \\(\\mathbb{F}_q\\)-points in the augmentation variety is:<br>";
+                document.getElementById("output").innerHTML += "\\("+fq_poly.present()+"\\)<br>";
+                if (show_diff) {
+                    document.getElementById("output").innerHTML += "<br>The differentials are:<br>";
+                    for (var k=0;k<initial_braid.num_str;k++) {
+                        document.getElementById("output").innerHTML += "\\( \\partial a_{"+String(k+1)+"}="+differentials[k].present()+"\\)<br>";
+                    }
+                }   
+                document.getElementById("output").innerHTML += "<br>The admissible cobordism is the composition of the following moves:<br>";
+                for (var x of stages[stages.length-1][5]){
+                    document.getElementById("output").innerHTML += x+", ";
+                }
+                document.getElementById("output").innerHTML += "<br><br>The indicator vector for the admissible filling (cluster seed) is:<br>";
+                document.getElementById("output").innerHTML += "\\( ("+String(stages[stages.length-1][3].interior_vector())+") \\)";
+                document.getElementById("output").innerHTML += "<br><br>The corresponding mutation sequence is:<br>";
+                for (var x of stages[stages.length-1][2]){
+                    document.getElementById("output").innerHTML += x+", ";
+                }
+                document.getElementById("output").innerHTML += "<br><br>The Reeb chords are mapped according to:<br>";
+                for (var i=0;i<stages[stages.length-1][4].length;i++){
+                    document.getElementById("output").innerHTML += "\\( b_{"+String(i+1)+"} \\mapsto "+stages[stages.length-1][4][i].present()+"\\)<br>";
+                }
+                document.getElementById("output").innerHTML += "<br>The cluster exchange matrix is:<br>"+print_mat(stages[stages.length-1][3].ex_mat)+"<br>";
+                document.getElementById("output").innerHTML += "<br>The cluster variables are:<br>";
+                for (var i=0;i<stages[stages.length-1][4].length;i++){
+                    document.getElementById("output").innerHTML += "\\( A_{"+String(i+1)+"}="+stages[stages.length-1][3].variables[i].present()+"\\)<br>";
+                }
+            }
+
+            function arrow(a,b,bend=false,solid=true) {
+                var angle = 0;
+                if (b[0]==a[0]) {
+                    angle = Math.sign(b[1]-a[1])*Math.PI/2;
+                }
+                else {
+                    angle = Math.atan2(b[1]-a[1],b[0]-a[0]);
+                }
+                if (bend && b[1]==a[1]) {
+                    var mid_pt = [(a[0]+b[0])/2,(a[1]+b[1])/2+25];
+                } else {
+                    var mid_pt = [(a[0]+b[0])/2,(a[1]+b[1])/2];
+                }
+                q_ctx.moveTo(a[0],a[1]);
+                if (!solid) {
+                    for (var i=0;i<7;i++) {
+                        q_ctx.lineTo(a[0]+(2*i+1)*(b[0]-a[0])/13,a[1]+(2*i+1)*(b[1]-a[1])/13);
+                        q_ctx.stroke();
+                        q_ctx.moveTo(a[0]+(2*i+2)*(b[0]-a[0])/13,a[1]+(2*i+2)*(b[1]-a[1])/13);
+                    }
+                } else if (bend && b[1]==a[1]) {
+                    q_ctx.quadraticCurveTo(mid_pt[0],mid_pt[1]+25,b[0],b[1]);
+                    q_ctx.stroke();
+                } else {
+                    q_ctx.lineTo(b[0],b[1]);
+                    q_ctx.stroke();
+                }
+                q_ctx.beginPath();
+                q_ctx.moveTo(mid_pt[0]+5*Math.cos(angle+Math.PI*3/4),mid_pt[1]+5*Math.sin(angle+Math.PI*3/4));
+                q_ctx.lineTo(mid_pt[0]+5*Math.cos(angle),mid_pt[1]+5*Math.sin(angle));
+                q_ctx.lineTo(mid_pt[0]+5*Math.cos(angle-Math.PI*3/4),mid_pt[1]+5*Math.sin(angle-Math.PI*3/4));
+                q_ctx.stroke();
+                q_ctx.fillStyle = "black";
+                q_ctx.fill();
+                q_ctx.closePath();
+                return;
+            }
+
+            function colored_circle(a,color,label){
+                q_ctx.font = "25px, Arial";
+                q_ctx.fillStyle = color;
+                q_ctx.beginPath();
+                q_ctx.arc(a[0],a[1],10,0,2*Math.PI,false);
+                q_ctx.fill();
+                q_ctx.stroke();
+                q_ctx.closePath();
+                q_ctx.fillStyle = "white";
+                if (label.length==1) {
+                    q_ctx.fillText(label,a[0]-2.5,a[1]+2.5);
+                } else {
+                    q_ctx.fillText(label,a[0]-6,a[1]+2.5);
+                }
+                return;
+            }
+
+            function colored_mk_pt(a,color){
+                br_ctx.fillStyle = color;
+                br_ctx.beginPath();
+                br_ctx.arc(a[0],a[1],5,0,2*Math.PI,false);
+                br_ctx.fill();
+                br_ctx.stroke();
+                br_ctx.closePath();
+                return;
+            }
+
+            function draw() {
+                //first we draw the braid
+                br_ctx.clearRect(0, 0, br_diag.width, br_diag.height);
+                br_ctx.beginPath();
+                br_ctx.font = "15px Arial";
+                br_ctx.fillStyle = "black";
+                var y_spacing = 290/(stages[stages.length-1][0].num_str-1);
+                var x_spacing = 640/stages[stages.length-1][0].length();
+                cross_spacing = x_spacing;
+                level_spacing = y_spacing;
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    if (Number.isInteger(stages[stages.length-1][0].word[i])) {
+                        for (var j=0;j<stages[stages.length-1][0].num_str;j++) {
+                            if (j==stages[stages.length-1][0].word[i]-1) {
+                                br_ctx.moveTo(20+i*x_spacing,20+j*y_spacing);
+                                br_ctx.lineTo(20+(i+1)*x_spacing,20+(j+1)*y_spacing);
+                                br_ctx.stroke();
+                            } else if (j==stages[stages.length-1][0].word[i]) {
+                                br_ctx.moveTo(20+i*x_spacing,20+j*y_spacing);
+                                br_ctx.lineTo(20+(i+0.4)*x_spacing,20+(j-0.4)*y_spacing);
+                                br_ctx.stroke();
+                                br_ctx.moveTo(20+(i+0.6)*x_spacing,20+(j-0.6)*y_spacing);
+                                br_ctx.lineTo(20+(i+1)*x_spacing,20+(j-1)*y_spacing);
+                                br_ctx.stroke();
+                            } else {
+                                br_ctx.moveTo(20+i*x_spacing,20+j*y_spacing);
+                                br_ctx.lineTo(20+(i+1)*x_spacing,20+j*y_spacing);
+                                br_ctx.stroke();
+                            }
+                        }
+                        br_ctx.fillText("b"+String(stages[stages.length-1][0].reeb_label[i]), 8+(i+0.5)*x_spacing, 50+(stages[stages.length-1][0].word[i]-0.5)*y_spacing);
+                    } else {
+                        for (var j=0;j<stages[stages.length-1][0].num_str;j++) {
+                            br_ctx.moveTo(20+i*x_spacing,20+j*y_spacing);
+                            br_ctx.lineTo(20+(i+1)*x_spacing,20+j*y_spacing);
+                            br_ctx.stroke();
+                        }
+                        colored_mk_pt([20+(i+0.5)*x_spacing, 20+(stages[stages.length-1][0].word[i][0]-1)*y_spacing], "black");
+                        br_ctx.fillText("p"+String(stages[stages.length-1][0].reeb_label[i]),8+(i+0.5)*x_spacing, 50+(stages[stages.length-1][0].word[i][0]-1)*y_spacing);
+                        colored_mk_pt([20+(i+0.5)*x_spacing, 20+(stages[stages.length-1][0].word[i][1]-1)*y_spacing], "black");
+                        br_ctx.fillText("-p"+String(stages[stages.length-1][0].reeb_label[i])+"^{-1}",8+(i+0.5)*x_spacing, 50+(stages[stages.length-1][0].word[i][1]-1)*y_spacing);
+                    }
+                }
+                for (var i=0;i<stages[stages.length-1][0].num_str;i++) {
+                    colored_mk_pt([660, 20+i*y_spacing], "black");
+                    br_ctx.fillText("t"+String(stages[stages.length-1][0].mk_pt_label[i]),670,20+i*y_spacing);
+                }
+                br_ctx.closePath();
+                //now we draw the quiver
+                q_ctx.clearRect(0, 0, q_diag.width, q_diag.height);
+                q_ctx.beginPath();
+                var q_x_spacing = [];
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    q_x_spacing.push(0);
+                }
+                var vertex_color = [];
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    vertex_color.push("green");
+                }
+                y_spacing = 350/(stages[stages.length-1][0].num_str);
+                var coordinates = [];
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    coordinates.push(0);
+                }
+                for (var i=0;i<stages[stages.length-1][0].num_str-1;i++) {
+                    if (stages[stages.length-1][1][i].length == 1) {
+                        coordinates[Math.abs(stages[stages.length-1][1][i][0])-1] = [350,(i+1)*y_spacing];
+                        vertex_color[Math.abs(stages[stages.length-1][1][i][0])-1] = "blue";
+                    } else {
+                        x_spacing = 620/(stages[stages.length-1][1][i].length-1);
+                        for (var j=0;j<stages[stages.length-1][1][i].length;j++) {
+                            coordinates[Math.abs(stages[stages.length-1][1][i][j])-1] = [40+j*x_spacing,(i+1)*y_spacing];
+                            q_x_spacing[Math.abs(stages[stages.length-1][1][i][j])-1] = x_spacing;
+                            if  (j==stages[stages.length-1][1][i].length-1) {
+                                vertex_color[Math.abs(stages[stages.length-1][1][i][j])-1] = "blue";
+                            } else if (stages[stages.length-1][1][i][j]<0) {
+                                vertex_color[Math.abs(stages[stages.length-1][1][i][j])-1] = "red";
+                            }
+                        }
+                    }
+                }
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    for (var j=0;j<i;j++) {
+                        if (stages[stages.length-1][3].ex_mat[i][j] > 0) {
+                            arrow(coordinates[i],coordinates[j],Math.abs(coordinates[i][0]-coordinates[j][0])>q_x_spacing[i]+1,Number.isInteger(stages[stages.length-1][3].ex_mat[i][j]));
+                        } else if (stages[stages.length-1][3].ex_mat[i][j] < 0) {
+                            arrow(coordinates[j],coordinates[i],Math.abs(coordinates[i][0]-coordinates[j][0])>q_x_spacing[i]+1,Number.isInteger(stages[stages.length-1][3].ex_mat[i][j]));
+                        }
+                    } 
+                }
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    colored_circle(coordinates[i],vertex_color[i],String(i+1));
+                }
+                q_ctx.closePath();
+                return;
+            }
+
+
+            function initiate() {
+                latex = document.getElementById("latex").checked;
+                show_diff = document.getElementById("diff").checked;
+                stages = [];
+                state = 0;
+                var num_str = parseInt(document.getElementById("num_str").value);
+                var word = document.getElementById("braid").value.split(",");
+                for(var i=0;i<word.length;i++) {
+                    word[i] = parseInt(word[i]);
+                    if (word[i]<=0 || word[i]>=num_str) {
+                        window.alert("Some of the crossings are invalid. For an n-strand braid, the crossings range from 1 to n-1.");
+                        return;
+                    }
+                }
+                var sign_mat = document.getElementById("sign_mat").value.split(",");
+                if (sign_mat == "identity") {
+                    sign_mat = [];
+                    for (var i=0;i<num_str;i++) {
+                        sign_mat.push(1);
+                    }
+                }
+                for(var i=0;i<sign_mat.length;i++) {
+                    sign_mat[i] = parseInt(sign_mat[i]);
+                    if ((sign_mat[i]!=1 && sign_mat[i]!=-1) || sign_mat.length!=num_str){
+                        window.alert("Sign matrix must be a diagonal matrix of size equal to the number of strings with diagonal entries +/-1.")
+                        return;
+                    }
+                }
+                var reeb_label = [];
+                var mk_pt_label = [];
+                var quiver_vertices = [];
+                var reeb_assignment =[];
+                for (var i=0;i<num_str-1;i++) {
+                    quiver_vertices.push([]);
+                }
+                for (var i=0;i<word.length;i++) {
+                    reeb_label.push(i+1);
+                    quiver_vertices[word[i]-1].push(i+1);
+                    reeb_assignment.push(new non_comm_poly([[1,["b_{"+String(i+1)+"}"],[1]]]))
+                }
+                for (var i=0;i<num_str;i++) {
+                    mk_pt_label.push(i+1);
+                }
+                initial_braid = new braid(num_str,word,reeb_label,mk_pt_label);
+                if (show_diff) {
+                    differentials = initial_braid.differentials();
+                }
+                fq_poly = fq_pts(initial_braid);
+                initial_cluster = initial_braid.initial_cluster(sign_mat);
+                stages.push([initial_braid,quiver_vertices,[],initial_cluster,reeb_assignment,[]]);
+                output_info();
+                draw();
+                if (latex) {
+                    MathJax.Hub.Typeset();
+                }
+                if (nolistener) {
+                    br_diag.addEventListener("click",function(evt){
+                        selected_crossing = getCrossing(br_diag,evt);
+                        mouseClick(selected_crossing);
+                    })
+                    nolistener = false;
+                }   
+                return;
+            }
+
+            function getCrossing(br_diag, evt) {
+                var result = null;
+                var rect = br_diag.getBoundingClientRect();
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    if (Number.isInteger(stages[stages.length-1][0].word[i]) && Math.abs(evt.clientX-(rect.left+20+(i+0.5)*cross_spacing))+Math.abs(evt.clientY-(rect.top+20+(stages[stages.length-1][0].word[i]-0.5)*level_spacing))<30 && Number.isInteger(stages[stages.length-1][0].word[i])) {
+                        result = i;
+                    }
+                }
+                console.log(result);
+                return(result);
+            }
+
+            function mouseClick(crossing){
+                latex = document.getElementById("latex").checked;
+                if (state==1) { //pinch
+                    double = [];
+                    triple = [];
+                    new_braid = stages[stages.length-1][0].clone();
+                    var assignment = new_braid.pinch(crossing);
+                    new_reeb_assignment = [];
+                    for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                        new_reeb_assignment.push(stages[stages.length-1][4][i].clone());
+                        for (var j=0;j<stages[stages.length-1][0].length();j++) {
+                            if (Number.isInteger(stages[stages.length-1][0].word[j])) {
+                                new_reeb_assignment[i].subs([["b_{"+String(stages[stages.length-1][0].reeb_label[j])+"}", new non_comm_poly([[1,["x_{"+String(stages[stages.length-1][0].reeb_label[j])+"}"],[1]]])]]);
+                            }
+                        }
+                        for (var j=0;j<stages[stages.length-1][0].length();j++) {
+                            if (Number.isInteger(stages[stages.length-1][0].word[j])) {
+                                new_reeb_assignment[i].subs([["x_{"+String(stages[stages.length-1][0].reeb_label[j])+"}",assignment[j]]]);
+                            }
+                        }
+                    }
+                    new_quiver_vertices = arrayClone(stages[stages.length-1][1]);
+                    new_mut_seq = [];
+                    for (var i=0;i<crossing;i++) {
+                        if (Number.isInteger(stages[stages.length-1][0].word[i])) {
+                            var count = 0;
+                            for (var entry of stages[stages.length-1][0].word.slice(i,crossing+1)) {
+                                if (entry == stages[stages.length-1][0].word[i]) {
+                                    count += 1;
+                                }
+                            }
+                            count -= 1;
+                            for (var entry of new_quiver_vertices[stages[stages.length-1][0].word[i]-1]) {
+                                if (entry>0) {
+                                    if (count>0) {
+                                        new_mut_seq.push(entry);
+                                        count -= 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    var to_remove = 0;
+                    for (var i=0;i<new_quiver_vertices[stages[stages.length-1][0].word[crossing]-1].length;i++) {
+                        if (new_quiver_vertices[stages[stages.length-1][0].word[crossing]-1][i] > 0) {
+                            to_remove = new_quiver_vertices[stages[stages.length-1][0].word[crossing]-1][i];
+                            new_quiver_vertices[stages[stages.length-1][0].word[crossing]-1][i] = -to_remove;
+                            break;
+                        }
+                    }
+                    var down_mut_seq = new_mut_seq.slice(0,);
+                    down_mut_seq.reverse();
+                    new_mut_seq = new_mut_seq.concat(down_mut_seq.filter(a => a != to_remove));
+                    new_cluster = stages[stages.length-1][3].clone();
+                    new_cluster.mut_seq(new_mut_seq);
+                    var new_moves = stages[stages.length-1][5].concat(["[pinch "+String(stages[stages.length-1][0].reeb_label[crossing])+"]"]);
+                    stages.push([new_braid, new_quiver_vertices, stages[stages.length-1][2].concat(new_mut_seq), new_cluster,new_reeb_assignment,new_moves]);
+                    output_info();
+                    draw();
+                    if (stages[stages.length-1][0].word.every(function(a){return !Number.isInteger(a)})) {
+                        document.getElementById("output").innerHTML += "<br>As a reality check, the cluster variables should be expressible as Laurent monomials in the local torus coordinates: <br>"
+                        var final_cluster_var = stages[stages.length-1][3].variables;
+                        var to_sub = [];
+                        var t_sub = [];
+                        for (var i=0;i<stages[stages.length-1][0].num_str;i++) {
+                            t_sub.push(new poly([[1,{}]]));
+                        }
+                        for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                            var p_var = {};
+                            p_var["p_{"+String(stages[stages.length-1][0].reeb_label[i])+"}"]=-1;
+                            t_sub[stages[stages.length-1][0].word[i][0]-1]=mult(t_sub[stages[stages.length-1][0].word[i][0]-1], new poly([[1,p_var]]));
+                            p_var["p_{"+String(stages[stages.length-1][0].reeb_label[i])+"}"]=1;
+                            t_sub[stages[stages.length-1][0].word[i][1]-1]=mult(t_sub[stages[stages.length-1][0].word[i][1]-1], new poly([[-1,p_var]]));
+                        }
+                        for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                            to_sub.push(stages[stages.length-1][4][i].to_poly());
+                        }
+                        for (var i = 0;i<stages[stages.length-1][0].length();i++) {
+                            for (var j=0;j<stages[stages.length-1][0].length();j++) {
+                                final_cluster_var[i].subs([["b_{"+String(j+1)+"}",to_sub[j]]]);
+                            }
+                            for (var j=0;j<stages[stages.length-1][0].num_str;j++) {
+                                final_cluster_var[i].subs([["t_{"+String(stages[stages.length-1][0].mk_pt_label[j])+"}",minus(t_sub[j])]]);
+                            }
+                            final_cluster_var[i].simplify();
+                            document.getElementById("output").innerHTML += "\\( A_{"+String(i+1)+"}="+final_cluster_var[i].present()+"\\)<br>";
+                        }
+                    }
+                } else if (state==2) {// commuting crossing
+                    triple = [];
+                    double.push(crossing);
+                    if (double.length==1) {
+                        var y_spacing = 290/(stages[stages.length-1][0].num_str-1);
+                        var x_spacing = 640/stages[stages.length-1][0].length();
+                        colored_mk_pt([20+(crossing+0.5)*x_spacing, 20+(stages[stages.length-1][0].word[crossing]-0.5)*y_spacing],"green");
+                    } else {
+                        double.sort(function(a, b){return a-b});
+                        if (stages[stages.length-1][0].word.slice(double[0]+1,double[1]).every(function(a){return !Number.isInteger(a)}) && Math.abs(stages[stages.length-1][0].word[double[0]]-stages[stages.length-1][0].word[double[1]])>1) {
+                            new_braid = stages[stages.length-1][0].clone();
+                            new_cluster = stages[stages.length-1][3].clone();
+                            var new_quiver_vertices = arrayClone(stages[stages.length-1][1]);
+                            var new_mut_seq = [];
+                            var new_moves =  stages[stages.length-1][5].concat(["[commute "+String(new_braid.reeb_label[double[0]])+" and "+String(new_braid.reeb_label[double[1]])+"]"]);
+                            var assignment = new_braid.commute(double[0],double[1]);
+                            var new_reeb_assignment = [];
+                            for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                                new_reeb_assignment.push(stages[stages.length-1][4][i].clone());
+                                new_reeb_assignment[i].subs([["b_{"+String(new_braid.reeb_label[double[0]])+"}",new non_comm_poly([[1,["x"],[1]]])]]);
+                                new_reeb_assignment[i].subs([["b_{"+String(new_braid.reeb_label[double[1]])+"}",new non_comm_poly([[1,["y"],[1]]])]]);
+                                new_reeb_assignment[i].subs([["x", assignment[0]]]);
+                                new_reeb_assignment[i].subs([["y", assignment[1]]]);
+                            }
+                            stages.push([new_braid, new_quiver_vertices, stages[stages.length-1][2].concat(new_mut_seq), new_cluster,new_reeb_assignment,new_moves]);
+                            output_info();
+                            draw();
+                            double = [];   
+                        } else {
+                            double = [];
+                            draw ();
+                            window.alert("The two crossings need to be at non-adjacent levels and there cannot be any other crossings within the interval between them.");
+                        }
+                    }
+                } else if (state==3) {// braid move
+                    double = [];
+                    triple.push(crossing);
+                    if (triple.length<3) {
+                        var y_spacing = 290/(stages[stages.length-1][0].num_str-1);
+                        var x_spacing = 640/stages[stages.length-1][0].length();
+                        colored_mk_pt([20+(crossing+0.5)*x_spacing, 20+(stages[stages.length-1][0].word[crossing]-0.5)*y_spacing],"green");
+                    } else {
+                        triple.sort(function(a, b){return a-b});
+                        if (stages[stages.length-1][0].word.slice(triple[0]+1,triple[1]).every(function(a){return !Number.isInteger(a)}) && stages[stages.length-1][0].word.slice(triple[1]+1,triple[2]).every(function(a){return !Number.isInteger(a)}) && stages[stages.length-1][0].word[triple[0]]==stages[stages.length-1][0].word[triple[2]] && Math.abs(stages[stages.length-1][0].word[triple[0]]-stages[stages.length-1][0].word[triple[1]])) {
+                            new_braid = stages[stages.length-1][0].clone();
+                            new_cluster = stages[stages.length-1][3].clone();
+                            var new_quiver_vertices = arrayClone(stages[stages.length-1][1]);
+                            var new_mut_seq = [];
+                            var new_moves =  stages[stages.length-1][5].concat(["[braid move among "+String(new_braid.reeb_label[triple[0]])+", "+String(new_braid.reeb_label[triple[1]])+", and "+String(new_braid.reeb_label[triple[2]])+"]"]);
+                            var assignment = new_braid.braid_move(triple[0],triple[1],triple[2]);
+                            var new_reeb_assignment = [];
+                            for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                                new_reeb_assignment.push(stages[stages.length-1][4][i].clone());
+                                new_reeb_assignment[i].subs([["b_{"+String(new_braid.reeb_label[triple[0]])+"}",new non_comm_poly([[1,["x"],[1]]])]]);
+                                new_reeb_assignment[i].subs([["b_{"+String(new_braid.reeb_label[triple[1]])+"}",new non_comm_poly([[1,["y"],[1]]])]]);
+                                new_reeb_assignment[i].subs([["b_{"+String(new_braid.reeb_label[triple[2]])+"}",new non_comm_poly([[1,["z"],[1]]])]]);
+                                new_reeb_assignment[i].subs([["x", assignment[0]]]);
+                                new_reeb_assignment[i].subs([["y", assignment[1]]]);
+                                new_reeb_assignment[i].subs([["z", assignment[2]]]);
+                            }
+                            var ver_pos = 0;
+                            for (var i = 0; i<triple[0];i++) {
+                                if (stages[stages.length-1][0].word[i] == stages[stages.length-1][0].word[triple[0]]) {
+                                    ver_pos += 1;
+                                }
+                            }
+                            for (var i=0;i<new_quiver_vertices[stages[stages.length-1][0].word[triple[0]]-1].length;i++) {
+                                if (new_quiver_vertices[stages[stages.length-1][0].word[triple[0]]-1][i]>0) {
+                                    if (ver_pos>0) {
+                                        ver_pos -= 1;
+                                    } else {
+                                        var to_move = new_quiver_vertices[stages[stages.length-1][0].word[triple[0]]-1][i];
+                                        new_quiver_vertices[stages[stages.length-1][0].word[triple[0]]-1].splice(i,1);
+                                        new_mut_seq.push(to_move);
+                                        break;
+                                    }
+                                }
+                            }
+                            new_cluster.mut(to_move);
+                            var num_neg_ver = 0;
+                            for (var i=0;i<new_quiver_vertices[stages[stages.length-1][0].word[triple[1]]-1].length;i++) {
+                                if (new_quiver_vertices[stages[stages.length-1][0].word[triple[1]]-1][i]<0) {
+                                    num_neg_ver +=1;
+                                } else {
+                                    break;
+                                }
+                            }
+                            ver_pos = 0;
+                            for (var i=0;i<triple[1];i++) {
+                                if (stages[stages.length-1][0].word[i] == stages[stages.length-1][0].word[triple[1]]) {
+                                    ver_pos += 1;
+                                }
+                            }
+                            ver_pos += num_neg_ver;
+                            new_quiver_vertices[stages[stages.length-1][0].word[triple[1]]-1].splice(ver_pos,0,to_move);
+                            stages.push([new_braid, new_quiver_vertices, stages[stages.length-1][2].concat(new_mut_seq), new_cluster,new_reeb_assignment,new_moves]);
+                            output_info();
+                            draw();
+                            triple = [];
+                        } else {
+                            triple =[];
+                            draw();
+                            window.alert("There cannot be other crossings within the internal of the three crossings.");
+                        }
+                    }
+                }
+                if (latex) {
+                    MathJax.Hub.Typeset();
+                }
+            }
+
+            function pinch() {
+                draw();
+                double = [];
+                triple = [];
+                state=1;
+            }
+
+            function braidMove() {
+                draw();
+                double = [];
+                triple = [];
+                state=3;
+            }
+
+            function commute() {
+                draw();
+                double = [];
+                triple = [];
+                state=2;
+            }
+
+            function ccw_rot() {
+                draw ();
+                double = [];
+                triple = [];
+                state=0;
+                new_braid = stages[stages.length-1][0].clone();
+                new_cluster = stages[stages.length-1][3].clone();
+                var assignment = new_braid.ccw_rot();
+                var new_reeb_assignment = [];
+                var new_quiver_vertices = arrayClone(stages[stages.length-1][1]);
+                var new_moves = stages[stages.length-1][5].concat(["[ccw. cyc. rotate]"]);
+                var new_mut_seq = [];
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    new_reeb_assignment.push(stages[stages.length-1][4][i].clone());
+                }
+                if (assignment == 0) {
+                    for (var item of new_reeb_assignment) {
+                        item.subs([["t_{"+String(new_braid.word[0][0])+"}",new non_comm_poly([[1,["p_{"+String(new_braid.reeb_label[0])+"}","t_{"+String(new_braid.word[0][0])+"}","p_{"+String(new_braid.reeb_label[0])+"}"],[-1,1,1]]])]]);
+                        item.subs([["t_{"+String(new_braid.word[0][1])+"}",new non_comm_poly([[1,["p_{"+String(new_braid.reeb_label[0])+"}","t_{"+String(new_braid.word[0][1])+"}","p_{"+String(new_braid.reeb_label[0])+"}"],[1,1,-1]]])]]);
+                    }
+                } else {
+                    for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                        new_reeb_assignment[i].subs([["b_{"+String(new_braid.reeb_label[0])+"}",assignment]]);
+                    }
+                    for (var i=0;i<new_quiver_vertices[new_braid.word[0]-1].length-1;i++) {
+                        if (new_quiver_vertices[new_braid.word[0]-1][i]>0) {
+                            new_mut_seq.push(new_quiver_vertices[new_braid.word[0]-1][i]);
+                        }
+                    }
+                    new_mut_seq.reverse();
+                    new_cluster.mut_seq(new_mut_seq);
+                }
+                stages.push([new_braid, new_quiver_vertices, stages[stages.length-1][2].concat(new_mut_seq), new_cluster,new_reeb_assignment,new_moves]);
+                output_info();
+                draw();
+                if (latex) {
+                    MathJax.Hub.Typeset();
+                }
+            }
+
+            function cw_rot() {
+                draw ();
+                double = [];
+                triple = [];
+                state=0;
+                new_braid = stages[stages.length-1][0].clone();
+                new_cluster = stages[stages.length-1][3].clone();
+                var assignment = new_braid.cw_rot();
+                var new_reeb_assignment = [];
+                var new_quiver_vertices = arrayClone(stages[stages.length-1][1]);
+                var new_moves = stages[stages.length-1][5].concat(["[cw. cyc. rotate]"]);
+                var new_mut_seq = [];
+                for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                    new_reeb_assignment.push(stages[stages.length-1][4][i].clone());
+                }
+                if (assignment == 0) {
+                    for (var item of new_reeb_assignment) {
+                        item.subs([["t_{"+String(new_braid.word[0][0])+"}",new non_comm_poly([[1,["p_{"+String(new_braid.reeb_label[0])+"}","t_{"+String(new_braid.word[0][0])+"}","p_{"+String(new_braid.reeb_label[0])+"}"],[1,1,-1]]])]]);
+                        item.subs([["t_{"+String(new_braid.word[0][1])+"}",new non_comm_poly([[1,["p_{"+String(new_braid.reeb_label[0])+"}","t_{"+String(new_braid.word[0][1])+"}","p_{"+String(new_braid.reeb_label[0])+"}"],[-1,1,1]]])]]);
+                    }
+                } else {
+                    for (var i=0;i<stages[stages.length-1][0].length();i++) {
+                        new_reeb_assignment[i].subs([["b_{"+String(new_braid.reeb_label[new_braid.length()-1])+"}",assignment]]);
+                    }
+                    for (var i=0;i<new_quiver_vertices[new_braid.word[new_braid.length()-1]-1].length-1;i++) {
+                        if (new_quiver_vertices[new_braid.word[new_braid.length()-1]-1][i]>0) {
+                            new_mut_seq.push(new_quiver_vertices[new_braid.word[new_braid.length()-1]-1][i]);
+                        }
+                    }
+                    new_cluster.mut_seq(new_mut_seq);
+                }
+                stages.push([new_braid, new_quiver_vertices, stages[stages.length-1][2].concat(new_mut_seq), new_cluster,new_reeb_assignment,new_moves]);
+                output_info();
+                draw();
+                if (latex) {
+                    MathJax.Hub.Typeset();
+                }
+            }
+
+            function back() {
+                stages.pop();
+                double =[];
+                triple =[];
+                state = 0;
+                draw();
+                output_info();
+                if (latex) {
+                    MathJax.Hub.Typeset();
+                }
+            }
+
+
+        </script>
+    </body>
+</html>

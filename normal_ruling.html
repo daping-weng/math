@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Normal Rulings</title>
+        <link rel="icon" href="plat_trefoil.png" type="image/icon type">
+        <script type="text/javascript" async
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+        </script>
+    </head>
+    <style>
+        #canvas_column {
+            float: left;
+            width: 800px;
+            padding: 10px;
+            height: 500px; 
+            display:table-cell;
+        } 
+    </style>
+    <body>
+        <div class="row">
+            <div class="column"><br>
+                Front projection &nbsp; &nbsp; 
+                <button type="button" onclick="initiate()">New front</button> &nbsp; &nbsp; 
+                <button type="button" onclick="left_cusp()">Left cusps</button> &nbsp; &nbsp;
+                <button type="button" onclick="crossing()">Crossings</button> &nbsp; &nbsp;
+                <button type="button" onclick="right_cusp()">Right cusps</button> &nbsp; &nbsp;
+                <button type="button" onclick="backspace()">Step back</button> &nbsp; &nbsp;
+                <br>
+                <br>
+                Normal ruling &nbsp; &nbsp; 
+                <button type = "button" onclick="pick()">Switches</button>&nbsp; &nbsp; 
+                <button type = "button" onclick="check()">Check</button>&nbsp; &nbsp; 
+                <button type = "button" onclick="set_maximal()">Set as a maximal ruling</button>&nbsp; &nbsp; Submaximal ruling: &nbsp; <input type="submaximal" id="submaximal" name="submaximal" value="" size="25"> &nbsp;
+                <button type = "button" onclick="submaximal_input()">Input</button>&nbsp; &nbsp; 
+                <br>
+                <br>
+                <label for="color_list">List of colors</label> &nbsp; <input type="color_list" id="color_list" name="color_list" value="blue,red,green,orange,purple,brown" size="40"> <br> &nbsp; &nbsp;
+            </div>
+            <div id="canvas_column">
+                <canvas id="front_proj" width="800" height="500" style="border:1px solid #000000;"></canvas>
+                <br>
+                <br>
+                <div id="output"></div>
+                <br>
+                <br>
+                <div id="ruling_stack"></div>
+            </div>
+        </div>
+    </body>
+    <script src = "front.js"></script>
+    <script>
+        var front_proj = document.getElementById("front_proj");
+        var ftx = front_proj.getContext("2d");
+        var draw_state = 0;
+        var ob_to_draw = null;
+        var listener = false;
+        var horizontal_spacing = 800/6;
+        var vertical_spacing = 500;
+        var color_list = document.getElementById("color_list").value.split(",");
+        var ruling = [];
+        var switches = [];
+        var colors = [];
+        var crossing_indices = [];
+        var num_crossing = 0;
+        front = new front();
+        var maximal_ruling = [];
+
+        function colored_mk_pt(a,color){
+            ftx.beginPath();
+            ftx.fillStyle = color;
+            ftx.strokeStyle = color;
+            ftx.arc(a[0],a[1],5,0,2*Math.PI,false);
+            ftx.fill();
+            ftx.stroke();
+            ftx.closePath();
+            return;
+        }
+
+        function count(list, s) {
+            var output = 0;
+            for (var i=0;i<list.length;i++) {
+                if (list[i]==s) {
+                    output ++;
+                }
+            }
+            return(output);
+        }
+
+        function color_assignment(ruling) {  
+            for (var i=0;i<front.ob_list.length;i++) {
+                if (ruling[i] == "l") {
+                    for (var j=0;j<front.total_num_levels;j++) {
+                        if (j == front.ob_level[i][0]-1 || j == front.ob_level[i][1]-1) {
+                            colors[i][j] = color_list[front.all_levels[i+1].length/2-1];
+                        } else if (i>0) {
+                            colors[i][j] = colors[i-1][j];
+                        }
+                    }
+                } else if (ruling[i] == "sw") {
+                    for (var j=0;j<front.total_num_levels;j++) {
+                        colors[i][j] = colors[i-1][j];
+                    }
+                } else if (ruling[i] == "ns" || ruling[i] == "dp" || ruling[i] == "rt") {
+                    for (var j=0;j<front.total_num_levels;j++) {
+                        if (j == front.ob_level[i][0]-1) {
+                            colors[i][j] = colors[i-1][front.ob_level[i][1]-1];
+                        } else if (j == front.ob_level[i][1]-1) {
+                            colors[i][j] = colors[i-1][front.ob_level[i][0]-1];
+                        } else {
+                            colors[i][j] = colors[i-1][j];
+                        }
+                    }    
+                } else {
+                    for (var j=0;j<front.total_num_levels;j++) {
+                        if (front.all_levels[i].includes(j+1)) {
+                            colors[i][j] = colors[i-1][j];
+                        }
+                    }
+                }
+            }
+        }
+
+
+        function get_location(front_proj, evt) {
+            var rect = front_proj.getBoundingClientRect();
+            console.log(Math.floor((evt.clientX-rect.left)/horizontal_spacing)-1,Math.floor((evt.clientY-rect.top)/vertical_spacing));
+            return([Math.floor((evt.clientX-rect.left)/horizontal_spacing)-1,Math.floor((evt.clientY-rect.top)/vertical_spacing)]);
+        }
+
+        function mouseClick(coord) {
+            if (draw_state == 1){
+                if (ob_to_draw == "l") {
+                    front.add_left_cusp(coord[1]);
+                    crossing_indices.push(0);
+                } else if (ob_to_draw == "c") {
+                    if (coord[1] != 0 && coord[1] != front.total_num_levels) {
+                        front.add_crossing(coord[1]);
+                        num_crossing ++;
+                        crossing_indices.push(num_crossing);
+                    }
+                } else if (ob_to_draw == "r") {
+                    if (coord[1] != 0 && coord[1] != front.total_num_levels) {
+                        front.add_right_cusp(coord[1]);
+                        crossing_indices.push(0);
+                    }
+                }
+                if (front.ob_list.length > 4) {
+                    horizontal_spacing = 800/(front.ob_list.length+2);
+                }
+                vertical_spacing = 500/(front.total_num_levels+1);
+            } else if (draw_state == 2) {
+                if (!(switches.includes(coord[0]))){
+                    switches.push(coord[0]);
+                }
+            }
+            draw();
+        }
+
+        function initiate() {
+            draw_state = 1;
+            front.clear();
+            colors = [];
+            ruling = [];
+            switches = [];
+            maximal_ruling = [];
+            crossing_indices = [];
+            num_crossing = 0;
+            horizontal_spacing = 800/6;
+            vertical_spacing = 500;
+            document.getElementById("output").innerHTML = "";
+            ftx.clearRect(0, 0, 800, 500);
+            if (!listener) {
+                front_proj.addEventListener(
+                    "click",function(evt){
+                        coord = get_location(front_proj, evt);
+                        if (coord != null) {
+                            mouseClick(coord);
+                        }
+                    }
+                )
+                listener = true;
+            }
+            document.getElementById("output").innerHTML = "";
+            document.getElementById("ruling_stack").innerHTML ="";
+        }
+
+        function left_cusp() {
+            ob_to_draw = "l";
+        }
+
+        function right_cusp() {
+            ob_to_draw = "r";
+        }
+
+        function crossing() {
+            ob_to_draw = "c";
+        }
+
+        function present(ruling) {
+            var output = [];
+            for (var i=0;i<ruling.length;i++) {
+                if (["sw","dp","rt"].includes(ruling[i])) {
+                    output.push(" "+ruling[i]);
+                }
+            }
+            output[0] = output[0].slice(1,output[0].length);
+            return(String(output));
+        }
+
+        function draw() {
+            if (draw_state == 3) {
+                color_assignment(ruling);
+            } else {
+                colors = [];
+                for (var i=0;i<front.ob_list.length;i++) {
+                    colors.push(Array(front.total_num_levels).fill("black"));
+                }
+            }
+            ftx.clearRect(0, 0, 800, 500);
+            for (var i=0;i<front.ob_list.length;i++) {
+                if (front.ob_list[i] == "l") {
+                    ftx.beginPath();
+                    ftx.strokeStyle = colors[i][front.ob_level[i][0]-1];
+                    ftx.moveTo(horizontal_spacing*(i+2),vertical_spacing*front.ob_level[i][0]);
+                    ftx.lineTo(horizontal_spacing*(i+1),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                    ftx.stroke();
+                    ftx.moveTo(horizontal_spacing*(i+2),vertical_spacing*front.ob_level[i][1]);
+                    ftx.lineTo(horizontal_spacing*(i+1),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                    ftx.stroke();
+                    ftx.closePath();
+                    for (var j=0;j<front.all_levels[i].length;j++) {
+                        ftx.beginPath();
+                        ftx.strokeStyle = colors[i][front.all_levels[i][j]-1];
+                        ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.all_levels[i][j]);
+                        ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*front.all_levels[i][j]);
+                        ftx.stroke();
+                        ftx.closePath();
+                    }
+                } else if (front.ob_list[i] == "c") {
+                    if (draw_state == 3 && ruling[i] == "sw") {
+                        ftx.beginPath();
+                        ftx.strokeStyle = colors[i][front.ob_level[i][0]-1];
+                        ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.ob_level[i][0]);
+                        ftx.lineTo(horizontal_spacing*(i+1.5),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                        ftx.stroke();
+                        ftx.moveTo(horizontal_spacing*(i+1.5),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                        ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*front.ob_level[i][0]);
+                        ftx.stroke();
+                        ftx.closePath();
+                        ftx.beginPath();
+                        ftx.strokeStyle = colors[i][front.ob_level[i][1]-1];
+                        ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.ob_level[i][1]);
+                        ftx.lineTo(horizontal_spacing*(i+1.5),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                        ftx.stroke();
+                        ftx.moveTo(horizontal_spacing*(i+1.5),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                        ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*front.ob_level[i][1]);
+                        ftx.stroke();
+                        ftx.closePath();
+                        ftx.beginPath();
+                        ftx.strokeStyle = "black";
+                        ftx.fillText(String(crossing_indices[i]),horizontal_spacing*(i+1.5),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2-20);
+                        ftx.closePath();
+                    } else {
+                        ftx.beginPath();
+                        ftx.strokeStyle = colors[i-1][front.ob_level[i][0]-1];
+                        ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.ob_level[i][0]);
+                        ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*front.ob_level[i][1]);
+                        ftx.stroke();
+                        ftx.closePath();
+                        ftx.beginPath();
+                        ftx.strokeStyle = colors[i-1][front.ob_level[i][1]-1];
+                        ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.ob_level[i][1]);
+                        ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*front.ob_level[i][0]);
+                        ftx.stroke();
+                        ftx.closePath();
+                        ftx.beginPath();
+                        ftx.strokeStyle = "black";
+                        ftx.fillText(String(crossing_indices[i]),horizontal_spacing*(i+1.5),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2-20);
+                        ftx.closePath();
+                    }
+                    for (var j=0;j<front.all_levels[i].length;j++) {
+                        if (front.all_levels[i][j] != front.ob_level[i][0] && front.all_levels[i][j] != front.ob_level[i][1]) {
+                            ftx.beginPath();
+                            ftx.strokeStyle = colors[i][front.all_levels[i][j]-1];
+                            ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.all_levels[i][j]);
+                            ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*front.all_levels[i][j]);
+                            ftx.stroke();
+                            ftx.closePath();
+                        }
+                    }
+                } else {
+                    ftx.beginPath();
+                    ftx.strokeStyle = colors[i-1][front.ob_level[i][0]-1];
+                    ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.ob_level[i][0]);
+                    ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                    ftx.stroke();
+                    ftx.closePath();
+                    ftx.beginPath();
+                    ftx.strokeStyle = colors[i-1][front.ob_level[i][1]-1];
+                    ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.ob_level[i][1]);
+                    ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*(front.ob_level[i][0]+front.ob_level[i][1])/2);
+                    ftx.stroke();
+                    ftx.closePath();
+                    for (var j=0;j<front.all_levels[i].length;j++) {
+                        ftx.beginPath();
+                        ftx.strokeStyle = colors[i][front.all_levels[i+1][j]-1];
+                        ftx.moveTo(horizontal_spacing*(i+1),vertical_spacing*front.all_levels[i+1][j]);
+                        ftx.lineTo(horizontal_spacing*(i+2),vertical_spacing*front.all_levels[i+1][j]);
+                        ftx.stroke();
+                        ftx.closePath();
+                    }
+                }
+            }
+            ftx.closePath();
+            if (draw_state == 2 || draw_state == 3) {
+                for (var i=0;i<switches.length;i++) {
+                    colored_mk_pt([horizontal_spacing*(switches[i]+1.5),vertical_spacing*(front.ob_level[switches[i]][0]+front.ob_level[switches[i]][1])/2],"black");
+                }
+            }
+        }
+        
+        function backspace() {
+            draw_state = 1;
+            crossing_indices.splice(crossing_indices.length-1,1);
+            if (front.ob_list[front.ob_list.length-1] == "c") {
+                num_crossing --;
+            }
+            front.backspace();
+            if (front.ob_list.length > 4) {
+                horizontal_spacing = 800/(front.ob_list.length+2);
+            } else {
+                horizontal_spacing = 800/6;
+            }
+            vertical_spacing = 500/(front.total_num_levels+1);
+            colors.splice(colors.length-1,1);
+            draw();
+            document.getElementById("output").innerHTML = "";
+        }
+
+        function pick() {
+            switches = [];
+            colors = [];
+            for (var i=0;i<front.ob_list.length;i++) {
+                colors.push(Array(front.total_num_levels).fill("black"));
+            }
+            draw_state = 2;
+            document.getElementById("output").innerHTML = "";
+            draw();
+        }
+
+        function check() {
+            draw_state = 3;
+            colors = [];
+            for (var i=0;i<front.ob_list.length;i++) {
+                    colors.push(Array(front.total_num_levels).fill("black"));
+                }
+            ruling = [];
+            for (var i=0;i<front.ob_list.length;i++) {
+                if (front.ob_list[i] == "c") {
+                    if (switches.includes(i)) {
+                        ruling.push("sw");
+                    } else {
+                        ruling.push("ns");
+                    }
+                } else {
+                    ruling.push(front.ob_list[i]);
+                }
+            }
+            document.getElementById("output").innerHTML = "";
+            if (front.check_ruling(ruling)) {
+                document.getElementById("output").innerHTML += "Yes, this is a normal ruling.";
+            } else {
+                document.getElementById("output").innerHTML += "No, this is NOT a normal ruling.";
+            }
+            color_assignment(ruling);
+            draw();
+            if (maximal_ruling.length>0) {
+                document.getElementById("ruling_stack").innerHTML = "The maximal ruling is set to ["+present(maximal_ruling)+"].";
+            }
+        }
+
+        function set_maximal() {
+            check();
+            maximal_ruling = [];
+            if (front.check_ruling(ruling)) {
+                for (var i=0;i<front.ob_list.length;i++) {
+                    maximal_ruling.push(ruling[i]);
+                }
+                document.getElementById("ruling_stack").innerHTML = "The maximal ruling is set to ["+present(maximal_ruling)+"].";
+
+            }
+        }
+
+        function submaximal_input() {
+            var submaximal = document.getElementById("submaximal").value.split(",");
+            for(var i=0;i<submaximal.length;i++) {
+                submaximal[i] = parseInt(submaximal[i]);
+                if (submaximal[i]<=0 || submaximal[i]>=crossing_indices.length) {
+                    window.alert("The submaximal input is incorrect.");
+                    return;
+                }
+            }
+            switches = [];
+            for (var i=0;i<front.ob_list.length;i++) {
+                if (front.ob_list[i] == "c") {
+                    if (submaximal.includes(crossing_indices[i]) && maximal_ruling[i] != "sw") {
+                        switches.push(i);
+                    } else if (!(submaximal.includes(crossing_indices[i])) && maximal_ruling[i] == "sw") {
+                        switches.push(i);
+                    }
+                }
+            }
+            check();
+            document.getElementById("ruling_stack").innerHTML = "The maximal ruling is set to ["+present(maximal_ruling)+"],<br>";
+            if (front.check_ruling(ruling) && count(ruling,"sw")+2 == count(maximal_ruling,"sw")) {
+                document.getElementById("ruling_stack").innerHTML += "and the submaximal ruling is ["+present(ruling)+"]."
+            }
+        }
+
+    </script>
+</html>
