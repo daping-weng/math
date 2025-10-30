@@ -246,6 +246,18 @@ class poly {
         }
         this.simplify();
     }
+
+    var_list(){
+        var output = [];
+        for (var i=0;i<this.length();i++) {
+            for (var x in this.poly[i][1]) {
+                if (!output.includes(x)) {
+                    output.push(x);
+                }
+            }
+        }
+        return(output);
+    }
 }
 
 
@@ -392,7 +404,7 @@ function divide(a,b) {
             quotient.simplify();
             return (quotient);
         }
-    }
+    } 
 }
 
 class fraction {
@@ -416,14 +428,6 @@ class fraction {
         } else if (this.num.poly.length == 0) {
             this.num = new poly([]);
             this.den = new poly([[1,{}]]);
-        }
-    }
-
-    equal(a) {
-        if (subtract(mult(this.num,a.den),mult(this.den,a.num)).poly.length>0) {
-            return(false);
-        } else {
-            return(true);
         }
     }
 }

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>3-Braid Closure Calculator</title>
+        <!--<link rel="icon" href="icon.png" type="image/icon type">-->
+        
+    </head>
+    <body>
+        <form>
+            <br>
+            <label for="blocks">Lengths of blocks (input an even-tuple of positive integers no less than 2; starting with the length of a block of 1's):</label>
+            <br>
+            <br>
+            <input type="text" id="blocks" name="blocks" value="2,2,2,2"> &nbsp;&nbsp; <button type="button" onclick="compute()">Compute</button>
+        </form>
+        <br>
+        <div id="output"></div>
+        <script src = "new_polynomial.js"></script>
+        <script src = "continuant.js"></script>
+        <script type="text/javascript" async
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+        </script>
+        <script>
+
+            function to_subs(output) {
+                for (var j=0;j<output.length;j++) {
+                    var x = output[j];
+                    var a = x.indexOf("{");
+                    var b = x.indexOf("}");
+                    var l = parseInt(x.substring(a+1,b));
+                    var c = x.indexOf("[");
+                    if (l==1) {
+                        var d = x.indexOf("]");
+                    } else {
+                        var d = x.indexOf(",");
+                    }
+                    var n = parseInt(x.substring(c+1,d));
+                    output[j] = [x,new continuant(l,n).to_poly()];
+                }
+                return(output);
+            }
+
+            function compute() {
+                var blocks = document.getElementById("blocks").value.split(",");
+                for(var i=0;i<blocks.length;i++) {
+                    blocks[i] = parseInt(blocks[i]);
+                }
+                var B = new three_braid_closure(blocks);
+                var M = B.matrix();
+                document.getElementById("output").innerHTML = "The product of the braid matrices is (the K_i's are continuant polynomials):<br><br>";
+                document.getElementById("output").innerHTML += "\\("+present_matrix(M)+"\\)<br><br>";
+                document.getElementById("output").innerHTML += "The equations that cut out the naive sheaf moduli space are:<br><br>";
+                var equations = [M[0][0], M[2][0], M[2][1]];
+                //console.log(equations);
+                for (var i=0;i<equations.length;i++) {
+                    var var_list = equations[i].var_list();
+                    //console.log(var_list);
+                    var sub_list = to_subs(var_list);
+                    equations[i].subs(sub_list);
+                    document.getElementById("output").innerHTML += "\\("+equations[i].present()+"\\)<br>";
+                }
+                document.getElementById("output").innerHTML += "<br>The action of the stabilizer subgroup is:<br><br>";
+                var homotopy = B.homotopy();
+                for (var i=0;i<homotopy.length;i++) {
+                    document.getElementById("output").innerHTML += "\\("+homotopy[i][0].present()+"\\longmapsto "+homotopy[i][1].present()+"\\)<br>";
+                }
+                MathJax.Hub.Typeset();
+            }
+            
+
+                    
+
+
+        </script>
+    </body>
+</html>
