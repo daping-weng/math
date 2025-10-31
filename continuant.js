@@ -116,8 +116,8 @@ class three_braid_closure {
                 a = new_a;
                 b = new poly([]);
             } else if (i%2 == 1) {
-                var new_a = add(mult(new continuant(this.blocks[i],index).present(),a), mult(new continuant(this.blocks[i]-1, index).present(),b));
-                var new_b = add(mult(new continuant(this.blocks[i]-1,index+1).present(),a), mult(new continuant(this.blocks[i]-2,index+1).present(),b));
+                var new_a = add(mult(new continuant(this.blocks[i]-1,index+1).present(),a), mult(new continuant(this.blocks[i]-2, index+1).present(),b));
+                var new_b = add(mult(new continuant(this.blocks[i]-2,index+2).present(),a), mult(new continuant(this.blocks[i]-3,index+2).present(),b));
                 index += this.blocks[i];
                 var z = {};
                 z["z_{"+String(index)+"}"]=1;
@@ -125,8 +125,8 @@ class three_braid_closure {
                 a = new poly([]);
                 b = new_b;
             } else {
-                var new_b = add(mult(new continuant(this.blocks[i],index).present(),b),mult(minus(new continuant(this.blocks[i]-1,index).present()),a));
-                var new_a = add(mult(new continuant(this.blocks[i]-1,index+1).present(),b),mult(minus(new continuant(this.blocks[i]-2,index+1).present()),a));
+                var new_b = add(mult(new continuant(this.blocks[i]-1,index+1).present(),b),mult(minus(new continuant(this.blocks[i]-2,index+1).present()),a));
+                var new_a = add(mult(new continuant(this.blocks[i]-2,index+2).present(),b),mult(minus(new continuant(this.blocks[i]-3,index+2).present()),a));
                 index += this.blocks[i];
                 var z = {};
                 z["z_{"+String(index)+"}"]=1;
